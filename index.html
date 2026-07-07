@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🌿 空气质量仪表板</title>
+<!-- CDN dependencies (only external resources) -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<style>
+/* ============ Theme variables ============ */
+:root {
+  --bg: #f8fafc;
+  --bg-elev: #ffffff;
+  --text: #1e293b;
+  --text-sub: #64748b;
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --primary: #0ea5e9;
+  --primary-fg: #ffffff;
+  --accent: #f1f5f9;
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,.08);
+  --card-radius: 12px;
+}
+.dark {
+  --bg: #0f172a;
+  --bg-elev: rgba(30,41,59,.4);
+  --text: #e2e8f0;
+  --text-sub: #94a3b8;
+  --text-muted: #64748b;
+  --border: #334155;
+  --border-strong: #475569;
+  --primary: #0ea5e9;
+  --primary-fg: #ffffff;
+  --accent: #1e293b;
+  --shadow: 0 1px 3px rgba(0,0,0,.3);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,.4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+/* ============ Layout ============ */
+.app { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.main {
+  flex: 1;
+  padding: 24px;
+  min-width: 0;
+}
+/* ============ Mobile top bar ============ */
+.mobile-bar {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.mobile-bar button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.mobile-bar .title { font-weight: 600; font-size: 14px; }
+@media (max-width: 1023px) {
+  .app { flex-direction: column; }
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    width: 300px; max-width: 85vw;
+    box-shadow: 2px 0 12px rgba(0,0,0,.15);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .mobile-bar { display: flex; }
+  .main { padding: 16px; }
+  .grid { grid-template-columns: 1fr !important; }
+}
+.drawer-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 35;
+}
+.drawer-overlay.show { display: block; }
+/* ============ Sidebar sections ============ */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.sidebar-header .logo { font-size: 24px; }
+.sidebar-header h1 { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.sidebar-header p { font-size: 11px; color: var(--text-sub); }
+.sidebar-scroll { flex: 1; overflow-y: auto; padding-right: 4px; }
+.sidebar-scroll::-webkit-scrollbar { width: 6px; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.section { margin-bottom: 20px; }
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-sub);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* ============ Upload zone ============ */
+.upload-zone {
+  border: 2px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.upload-zone:hover, .upload-zone.drag-over {
+  border-color: var(--primary);
+  background: rgba(14,165,233,.05);
+}
+.upload-zone .icon { font-size: 28px; color: var(--primary); margin-bottom: 6px; }
+.upload-zone .main-text { font-size: 13px; font-weight: 500; color: var(--text); }
+.upload-zone .sub-text { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+.btn-sample {
+  width: 100%;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid rgba(14,165,233,.3);
+  background: rgba(14,165,233,.08);
+  color: #0284c7;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+}
+.dark .btn-sample { color: #7dd3fc; border-color: rgba(14,165,233,.4); background: rgba(14,165,233,.12); }
+.btn-sample:hover { background: rgba(14,165,233,.15); }
+.btn-sample:disabled { opacity: .5; cursor: not-allowed; }
+/* ============ File list ============ */
+.file-list { margin-top: 8px; max-height: 180px; overflow-y: auto; }
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.file-item .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.file-item .fmeta { font-size: 11px; color: var(--text-sub); }
+.file-item .remove-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 2px; border-radius: 4px;
+  opacity: 0; transition: opacity .15s, color .15s, background .15s;
+}
+.file-item:hover .remove-btn { opacity: 1; }
+.file-item .remove-btn:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+/* ============ Stats grid ============ */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  padding: 10px;
+}
+.stat-card .stat-icon { display: inline-flex; padding: 4px; border-radius: 4px; margin-bottom: 4px; font-size: 14px; }
+.stat-card .stat-value { font-size: 18px; font-weight: 700; line-height: 1; }
+.stat-card .stat-label { font-size: 10px; color: var(--text-sub); margin-top: 2px; }
+/* ============ Form controls ============ */
+.view-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; background: var(--accent); border-radius: 8px; padding: 2px; }
+.view-tab {
+  padding: 6px 8px; border: none; background: transparent; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--text-sub); border-radius: 6px; transition: all .15s;
+}
+.view-tab.active { background: var(--primary); color: var(--primary-fg); }
+.view-desc { font-size: 11px; color: var(--text-sub); margin-top: 6px; }
+.field-label { font-size: 11px; color: var(--text-sub); margin-bottom: 4px; display: block; }
+input[type="date"], select.compact, input[type="text"] {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elev); color: var(--text); font-size: 13px;
+}
+input[type="date"]:focus, select.compact:focus { outline: none; border-color: var(--primary); }
+.city-list {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px; max-height: 176px; overflow-y: auto;
+}
+.city-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px;
+  cursor: pointer; font-size: 13px;
+}
+.city-row:hover { background: var(--accent); }
+.city-row input { accent-color: var(--primary); }
+.city-select-all {
+  display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500;
+  color: var(--primary); cursor: pointer; background: none; border: none; padding: 0;
+}
+.level-badge {
+  margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 12px;
+  border: 1px solid #fcd34d; background: #fffbeb; color: #b45309;
+}
+.dark .level-badge { border-color: #92400e; background: rgba(120,53,15,.3); color: #fcd34d; }
+.level-badge .clear-link { display: inline-block; margin-top: 6px; font-size: 11px; text-decoration: underline; cursor: pointer; }
+/* ============ Main header ============ */
+.main-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.main-header h2 { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.preset-pills { display: flex; gap: 2px; border: 1px solid var(--border); border-radius: 8px; padding: 2px; background: var(--bg-elev); }
+.preset-pill {
+  padding: 4px 12px; border: none; background: transparent; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: var(--text-sub); border-radius: 6px; transition: all .15s;
+}
+.preset-pill.active { background: var(--primary); color: var(--primary-fg); }
+.header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.icon-btn {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev);
+  color: var(--text-sub); font-size: 12px; font-weight: 500; cursor: pointer; transition: all .15s;
+}
+.icon-btn:hover { background: var(--accent); }
+.icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.icon-btn.square { padding: 8px; }
+/* ============ Empty state ============ */
+.empty-state {
+  border: 2px dashed var(--border); border-radius: 12px; padding: 80px 20px; text-align: center;
+  background: var(--bg-elev);
+}
+.empty-state .emoji { font-size: 56px; margin-bottom: 16px; }
+.empty-state h3 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.empty-state p { font-size: 14px; color: var(--text-sub); margin-bottom: 16px; max-width: 420px; margin-left: auto; margin-right: auto; }
+.empty-state .hint {
+  display: inline-block; padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--accent); font-size: 12px; color: var(--text-sub);
+}
+/* ============ Chart grid ============ */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.chart-card {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: var(--card-radius);
+  background: var(--bg-elev); box-shadow: var(--shadow); transition: box-shadow .2s;
+}
+.chart-card:hover { box-shadow: var(--shadow-hover); }
+.chart-card.dragging { opacity: .5; }
+.chart-card.drag-over { border-color: var(--primary); }
+.card-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+}
+.grip { color: var(--text-muted); cursor: grab; flex-shrink: 0; }
+.grip:active { cursor: grabbing; }
+.card-title { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.level-chip {
+  display: flex; align-items: center; gap: 4px; padding: 2px 6px;
+  font-size: 11px; color: #b45309; cursor: pointer; border-radius: 4px;
+}
+.level-chip:hover { background: rgba(180,83,9,.1); }
+.export-btn {
+  padding: 4px 6px; border: none; background: none; cursor: pointer; color: var(--text-muted);
+  border-radius: 4px; opacity: 0; transition: opacity .15s, color .15s, background .15s;
+}
+.chart-card:hover .export-btn { opacity: 1; }
+.export-btn:hover { color: var(--primary); background: var(--accent); }
+.export-btn:disabled { opacity: 0 !important; cursor: not-allowed; }
+.card-filter-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 16px; border-bottom: 1px solid var(--border); font-size: 11px;
+}
+.card-filter-bar .lbl { color: var(--text-sub); }
+.card-filter-bar select, .card-filter-bar input[type="date"] {
+  padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-elev); color: var(--text); font-size: 11px; width: auto;
+}
+.card-filter-bar select:focus, .card-filter-bar input[type="date"]:focus { outline: none; border-color: var(--primary); }
+.card-filter-bar .city-multi {
+  display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--bg-elev);
+  color: var(--text); font-size: 11px; font-weight: 500; cursor: pointer; position: relative;
+}
+.card-filter-bar .city-multi:hover { background: var(--accent); }
+.card-filter-bar .city-multi:disabled { opacity: .5; cursor: not-allowed; }
+.city-popover {
+  position: absolute; top: 100%; left: 0; margin-top: 4px; z-index: 20;
+  min-width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); box-shadow: var(--shadow-hover); max-height: 240px; overflow-y: auto;
+}
+.city-popover .pop-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.city-popover .pop-row:hover { background: var(--accent); }
+.city-popover .pop-row input { accent-color: var(--primary); }
+.mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.mode-toggle button {
+  padding: 3px 8px; border: none; background: transparent; cursor: pointer;
+  font-size: 11px; font-weight: 500; color: var(--text-sub); transition: all .15s;
+}
+.mode-toggle button.active { background: var(--primary); color: var(--primary-fg); }
+.sync-toggle {
+  display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 4px; font-size: 11px;
+  color: var(--text-sub); cursor: pointer; user-select: none;
+}
+.sync-toggle:hover { background: var(--accent); }
+.sync-toggle.active { border-color: rgba(14,165,233,.4); background: rgba(14,165,233,.08); color: #0284c7; }
+.dark .sync-toggle.active { color: #7dd3fc; }
+.sync-toggle input { accent-color: var(--primary); }
+.card-body { padding: 8px; flex: 1; position: relative; }
+.chart-canvas { width: 100%; height: 340px; }
+.table-wrap { height: 360px; display: flex; flex-direction: column; }
+.table-meta { font-size: 11px; color: var(--text-sub); margin-bottom: 8px; display: flex; justify-content: space-between; }
+.table-scroll { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.data-table thead { position: sticky; top: 0; background: var(--accent); z-index: 1; }
+table.data-table th { padding: 8px 10px; text-align: left; font-weight: 600; color: var(--text-sub); border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
+table.data-table th:hover { background: var(--border); }
+table.data-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+table.data-table tr:hover td { background: rgba(14,165,233,.04); }
+.lvl-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; }
+.no-data { height: 320px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 14px; }
+/* ============ Toast ============ */
+.toast-wrap { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 10px 16px; border-radius: 8px; background: var(--bg-elev); color: var(--text);
+  box-shadow: var(--shadow-hover); font-size: 13px; border-left: 3px solid var(--primary);
+  animation: slideIn .25s ease; max-width: 360px;
+}
+.toast.success { border-left-color: #22c55e; }
+.toast.error { border-left-color: #ef4444; }
+.toast.info { border-left-color: #f59e0b; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+/* ============ Misc ============ */
+.spin { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.checkbox-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.checkbox-row:hover { background: var(--accent); }
+.checkbox-row input { accent-color: var(--primary); }
+</style>
+</head>
+<body>
+<div class="toast-wrap" id="toasts"></div>
+
+<div class="mobile-bar">
+  <button id="mobileFilterBtn"><span>☰</span> 筛选</button>
+  <span class="title">🌿 空气质量仪表板</span>
+</div>
+<div class="drawer-overlay" id="drawerOverlay"></div>
+
+<div class="app">
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo">🌿</span>
+      <div>
+        <h1>空气质量仪表板</h1>
+        <p>Air Quality Dashboard</p>
+      </div>
+    </div>
+    <div class="sidebar-scroll" id="sidebarScroll">
+      <!-- Sections rendered by JS -->
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main class="main">
+    <div class="main-header">
+      <h2><span style="color:var(--primary)">▦</span> 数据可视化</h2>
+      <div class="preset-pills" id="presetPills">
+        <button class="preset-pill active" data-view="overview">概述视图</button>
+        <button class="preset-pill" data-view="deep">深度分析视图</button>
+        <button class="preset-pill" data-view="all">全部图表</button>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="pdfBtn" disabled><span>📄</span> 导出 PDF</button>
+        <button class="icon-btn square" id="themeBtn" title="切换主题"><span id="themeIcon">🌙</span></button>
+      </div>
+    </div>
+    <div id="mainBody"></div>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+ * CONSTANTS
+ * ========================================================================== */
+const METRIC_LABELS = { aqi:'AQI指数', pm25:'PM2.5', pm10:'PM10', no2:'NO₂', so2:'SO₂', co:'CO', o3:'O₃' };
+const ALL_METRICS = ['aqi','pm25','pm10','no2','so2','co','o3'];
+const POLLUTANT_METRICS = ['pm25','pm10','no2','so2','co','o3'];
+const CHART_TITLES = {
+  trend:'城市 AQI 趋势折线图', calendar:'单城市 AQI 日历热力图', pie:'单城市各等级占比饼图',
+  boxplot:'单城市污染物箱线图', radar:'单城市污染物雷达图', bar:'污染物浓度柱状图',
+  scatter:'污染物相关性气泡图', table:'数据表格预览'
+};
+const SINGLE_CITY_CHARTS = ['calendar','pie','boxplot','radar'];
+const MULTI_CITY_CHARTS = ['trend','bar','scatter'];
+const CARD_CHART_IDS = ['trend','calendar','pie','bar','boxplot','radar','scatter'];
+const PRESET_VIEWS = {
+  overview: { label:'概述视图', charts:['trend','calendar','pie','bar'] },
+  deep: { label:'深度分析视图', charts:['boxplot','radar','scatter','table'] },
+  all: { label:'全部图表', charts:['trend','calendar','pie','bar','boxplot','radar','scatter','table'] }
+};
+const LEVEL_COLORS = { '优':'#22c55e','良':'#84cc16','轻度污染':'#eab308','中度污染':'#f97316','重度污染':'#ef4444','严重污染':'#991b1b' };
+const LEVEL_ORDER = ['优','良','轻度污染','中度污染','重度污染','严重污染'];
+const CITY_PALETTE = ['#0ea5e9','#14b8a6','#f59e0b','#ec4899','#8b5cf6','#10b981','#f43f5e','#6366f1','#a855f7','#06b6d4'];
+
+/* ============================================================================
+ * STATE
+ * ========================================================================== */
+const state = {
+  records: [],
+  files: [],
+  filters: { startDate:'', endDate:'', cities:[], metric:'aqi', levelFilter:null },
+  view: 'overview',
+  chartOrder: ['trend','calendar','pie','bar','boxplot','radar','scatter','table'],
+  cardStates: {},
+  dark: false,
+  draggedChart: null,
+  echartsInstances: {}, // chartId -> ECharts instance
+  openPopover: null,    // chartId of open city popover
+};
+
+/* ============================================================================
+ * DATA PROCESSING
+ * ========================================================================== */
+function parseDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) { const d = new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d.getTime()) ? null : d; }
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) { const d = new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d.getTime()) ? null : d; }
+  const d = new Date(s); return isNaN(d.getTime()) ? null : d;
+}
+function formatDate(d) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function cityFromFilename(fn) {
+  const base = fn.split(/[\\/]/).pop() || fn;
+  const noExt = base.replace(/\.csv$/i, '');
+  const idx = noExt.lastIndexOf('_');
+  if (idx > 0 && /^\d{6}$/.test(noExt.slice(idx+1))) return noExt.slice(0, idx);
+  return noExt;
+}
+function toNumber(v) {
+  if (v == null || v === '') return NaN;
+  if (typeof v === 'number') return v;
+  const n = Number(String(v).trim()); return isNaN(n) ? NaN : n;
+}
+function aqiToLevel(aqi) {
+  if (aqi <= 50) return '优';
+  if (aqi <= 100) return '良';
+  if (aqi <= 150) return '轻度污染';
+  if (aqi <= 200) return '中度污染';
+  if (aqi <= 300) return '重度污染';
+  return '严重污染';
+}
+function parseCsv(text, city) {
+  const result = Papa.parse(text, { header:true, skipEmptyLines:true, transformHeader:h=>h.trim() });
+  const records = [];
+  for (const row of result.data) {
+    const dateObj = parseDate(row['日期']);
+    if (!dateObj) continue;
+    records.push({
+      city, date: formatDate(dateObj), dateObj,
+      aqi: toNumber(row['AQI指数']),
+      level: (row['质量等级']||'').trim() || '未知',
+      rank: toNumber(row['当天AQI排名']),
+      pm25: toNumber(row['PM2.5']), pm10: toNumber(row['PM10']),
+      no2: toNumber(row['NO2']), so2: toNumber(row['SO2']),
+      co: toNumber(row['CO']), o3: toNumber(row['O3']),
+    });
+  }
+  records.sort((a,b) => a.dateObj - b.dateObj);
+  return records;
+}
+function uniqueCities(records) {
+  return Array.from(new Set(records.map(r => r.city))).sort((a,b) => a.localeCompare(b,'zh'));
+}
+function dateRange(records) {
+  if (!records.length) return { start:'', end:'' };
+  let mn = records[0].dateObj, mx = records[0].dateObj;
+  for (const r of records) { if (r.dateObj < mn) mn = r.dateObj; if (r.dateObj > mx) mx = r.dateObj; }
+  return { start: formatDate(mn), end: formatDate(mx) };
+}
+function applyFilters(records, f) {
+  const startMs = parseDate(f.startDate)?.getTime() ?? -Infinity;
+  const endMs = parseDate(f.endDate)?.getTime() ?? Infinity;
+  const citySet = new Set(f.cities);
+  return records.filter(r => {
+    if (!citySet.has(r.city)) return false;
+    const t = r.dateObj.getTime();
+    if (t < startMs || t > endMs) return false;
+    if (f.levelFilter && r.level !== f.levelFilter) return false;
+    return true;
+  });
+}
+function computeStats(records) {
+  if (!records.length) return { totalRecords:0, cityCount:0, avgAqi:0, maxAqi:0, minAqi:0, goodRate:0, dateRange:{start:'',end:''} };
+  let sum=0, mx=-Infinity, mn=Infinity, good=0, valid=0;
+  for (const r of records) {
+    if (isNaN(r.aqi)) continue;
+    sum += r.aqi; valid++;
+    if (r.aqi > mx) mx = r.aqi;
+    if (r.aqi < mn) mn = r.aqi;
+    if (r.level === '优' || r.level === '良') good++;
+  }
+  const range = dateRange(records);
+  return {
+    totalRecords: records.length,
+    cityCount: uniqueCities(records).length,
+    avgAqi: valid ? Math.round((sum/valid)*10)/10 : 0,
+    maxAqi: mx === -Infinity ? 0 : mx,
+    minAqi: mn === Infinity ? 0 : mn,
+    goodRate: valid ? Math.round((good/valid)*1000)/10 : 0,
+    dateRange: range,
+  };
+}
+function avgMetric(records, metric) {
+  const vals = records.map(r => r[metric]).filter(v => !isNaN(v));
+  if (!vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0) / vals.length;
+}
+function metricValues(records, metric) {
+  return records.map(r => r[metric]).filter(v => !isNaN(v));
+}
+function boxplotStats(values) {
+  if (!values.length) return { stats:[0,0,0,0,0], outliers:[] };
+  const s = [...values].sort((a,b)=>a-b);
+  const q = p => { const pos = (s.length-1)*p; const b = Math.floor(pos); const rest = pos-b; return s[b+1]!==undefined ? s[b]+rest*(s[b+1]-s[b]) : s[b]; };
+  const q1 = q(.25), med = q(.5), q3 = q(.75), iqr = q3-q1;
+  const lf = q1-1.5*iqr, uf = q3+1.5*iqr;
+  const inliers = s.filter(v => v>=lf && v<=uf);
+  const outliers = s.filter(v => v<lf || v>uf);
+  return { stats:[inliers[0]??s[0], q1, med, q3, inliers[inliers.length-1]??s[s.length-1]], outliers };
+}
+
+/* ============================================================================
+ * SAMPLE DATA
+ * ========================================================================== */
+function seededRandom(seed) { let s = seed; return () => { s = (s*9301+49297) % 233280; return s/233280; }; }
+const CITY_PROFILES = [
+  { city:'北京', baseAqi:95, pm25:.6, pm10:.9, no2:.45, so2:.12, co:1.0, o3:.7, seed:1001 },
+  { city:'上海', baseAqi:70, pm25:.55, pm10:.7, no2:.4, so2:.1, co:.8, o3:.8, seed:2002 },
+  { city:'广州', baseAqi:58, pm25:.45, pm10:.6, no2:.35, so2:.08, co:.7, o3:.9, seed:3003 },
+];
+function generateSampleData() {
+  const records = [];
+  const start = new Date(2025,0,1), end = new Date(2025,11,31);
+  for (const p of CITY_PROFILES) {
+    const rand = seededRandom(p.seed);
+    const cur = new Date(start);
+    while (cur <= end) {
+      const month = cur.getMonth();
+      const season = (month<=1||month>=10) ? 1.35 : (month>=5&&month<=8 ? .7 : 1);
+      const noise = .7 + rand()*.8;
+      const spike = rand() > .93 ? 1.5+rand() : 1;
+      const aqi = Math.max(15, Math.round(p.baseAqi * season * noise * spike));
+      records.push({
+        city: p.city, date: formatDate(cur), dateObj: new Date(cur),
+        aqi, level: aqiToLevel(aqi), rank: 0,
+        pm25: Math.round(aqi*p.pm25*(.8+rand()*.4)),
+        pm10: Math.round(aqi*p.pm10*(.8+rand()*.4)),
+        no2: Math.round(aqi*p.no2*(.7+rand()*.6)),
+        so2: Math.round(aqi*p.so2*(.6+rand()*.8)*10)/10,
+        co: Math.round(aqi*p.co*(.6+rand()*.8)*100)/100,
+        o3: Math.round(aqi*p.o3*(.7+rand()*.6)),
+      });
+      cur.setDate(cur.getDate()+1);
+    }
+  }
+  return records;
+}
+
+/* ============================================================================
+ * CHART CONFIG BUILDERS
+ * ========================================================================== */
+function themeColors() {
+  const dark = state.dark;
+  return {
+    text: dark ? '#e2e8f0' : '#1e293b',
+    sub: dark ? '#94a3b8' : '#64748b',
+    axis: dark ? '#334155' : '#cbd5e1',
+    split: dark ? '#1e293b' : '#e2e8f0',
+  };
+}
+function emptyOption(msg) {
+  return { title: { text: msg, left:'center', top:'center', textStyle:{ color: themeColors().sub, fontSize:14, fontWeight:'normal' } } };
+}
+function buildTrendOption(records, filters) {
+  const tc = themeColors();
+  const cities = filters.cities;
+  const dateSet = new Set(); for (const r of records) dateSet.add(r.date);
+  const dates = Array.from(dateSet).sort();
+  const series = cities.map((city, idx) => {
+    const m = new Map();
+    for (const r of records) if (r.city === city && !isNaN(r.aqi)) m.set(r.date, r.aqi);
+    return {
+      name: city, type:'line', smooth:true, symbol:'circle', symbolSize:5,
+      showSymbol: dates.length <= 40, lineStyle:{ width:2 },
+      itemStyle:{ color: CITY_PALETTE[idx % CITY_PALETTE.length] },
+      data: dates.map(d => m.get(d) ?? null), connectNulls:true,
+    };
+  });
+  return {
+    backgroundColor:'transparent',
+    tooltip: {
+      trigger:'axis', axisPointer:{ type:'cross' },
+      formatter(params) {
+        if (!Array.isArray(params) || !params.length) return '';
+        let html = `<div style="font-weight:600;margin-bottom:4px">${params[0].axisValue}</div>`;
+        for (const p of params) {
+          if (p.value == null) continue;
+          const level = aqiToLevel(Number(p.value));
+          html += `${p.marker} ${p.seriesName}: <b>${p.value}</b> <span style="color:#94a3b8">(${level})</span><br/>`;
+        }
+        return html;
+      },
+    },
+    legend: { data: cities, top:0, textStyle:{ color: tc.text, fontSize:12 } },
+    grid: { left:50, right:24, top:40, bottom:60 },
+    xAxis: { type:'category', data: dates, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub, fontSize:11 }, boundaryGap:false },
+    yAxis: { type:'value', name:'AQI', nameTextStyle:{ color: tc.sub }, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub }, splitLine:{ lineStyle:{ color: tc.split } } },
+    dataZoom: [ { type:'inside', start:0, end:100 }, { type:'slider', height:18, bottom:12 } ],
+    series,
+  };
+}
+function buildCalendarOption(records, filters) {
+  const tc = themeColors();
+  const cr = records.filter(r => r.city === filters.focusCity);
+  if (!cr.length) return emptyOption('该城市在当前筛选范围内无数据');
+  const data = cr.filter(r => !isNaN(r.aqi)).map(r => [r.date, r.aqi]);
+  const years = Array.from(new Set(cr.map(r => r.dateObj.getFullYear()))).sort();
+  const calendars = years.map((year, idx) => ({
+    left: idx === 0 ? 40 : 'center',
+    top: idx === 0 ? 50 : 30 + idx*180,
+    range: String(year), cellSize:['auto',14],
+    itemStyle:{ borderWidth:1, borderColor: state.dark ? '#1e293b' : '#fff', color: state.dark ? '#1e293b' : '#f1f5f9' },
+    yearLabel:{ show:true, color: tc.sub, fontSize:14 },
+    monthLabel:{ color: tc.sub, fontSize:11 }, dayLabel:{ color: tc.sub, fontSize:10 },
+    splitLine:{ show:false },
+  }));
+  return {
+    backgroundColor:'transparent',
+    tooltip: { formatter: p => `${p.value[0]}<br/>AQI: ${p.value[1]}` },
+    visualMap: { min:0, max:300, calculable:true, orient:'horizontal', left:'center', bottom:10,
+      inRange:{ color:['#22c55e','#84cc16','#eab308','#f97316','#ef4444','#991b1b'] }, textStyle:{ color: tc.sub } },
+    calendar: calendars, series:[{ type:'heatmap', coordinateSystem:'calendar', data }],
+  };
+}
+function buildPieOption(records, filters) {
+  const tc = themeColors();
+  const cr = records.filter(r => r.city === filters.focusCity);
+  if (!cr.length) return emptyOption('该城市在当前筛选范围内无数据');
+  const counts = new Map();
+  for (const r of cr) counts.set(r.level, (counts.get(r.level) ?? 0) + 1);
+  const data = Array.from(counts.entries())
+    .sort((a,b) => { const ia = LEVEL_ORDER.indexOf(a[0]), ib = LEVEL_ORDER.indexOf(b[0]); return (ia===-1?99:ia)-(ib===-1?99:ib); })
+    .map(([name, value]) => ({ name, value, itemStyle:{ color: LEVEL_COLORS[name] ?? '#94a3b8' } }));
+  return {
+    backgroundColor:'transparent',
+    tooltip:{ trigger:'item', formatter:'{b}: {c} 天 ({d}%)' },
+    legend:{ orient:'vertical', left:'left', textStyle:{ color: tc.sub } },
+    series:[{
+      type:'pie', radius:['38%','66%'], center:['58%','50%'], avoidLabelOverlap:true,
+      itemStyle:{ borderRadius:6, borderColor: state.dark ? '#1e293b' : '#fff', borderWidth:2 },
+      label:{ show:true, formatter:'{b}\n{d}%', color: tc.text, fontSize:11 },
+      emphasis:{ label:{ show:true, fontSize:14, fontWeight:'bold' }, itemStyle:{ shadowBlur:10, shadowColor:'rgba(0,0,0,.3)' } },
+      data,
+    }],
+  };
+}
+function buildBoxplotOption(records, filters) {
+  const tc = themeColors();
+  const cr = records.filter(r => r.city === filters.focusCity);
+  if (!cr.length) return emptyOption('该城市在当前筛选范围内无数据');
+  const labels = POLLUTANT_METRICS.map(m => METRIC_LABELS[m]);
+  const statsData = [], outlierData = [];
+  POLLUTANT_METRICS.forEach((m, idx) => {
+    const { stats, outliers } = boxplotStats(metricValues(cr, m));
+    statsData.push(stats); outliers.forEach(o => outlierData.push([idx, o]));
+  });
+  return {
+    backgroundColor:'transparent', tooltip:{ trigger:'item' },
+    grid:{ left:60, right:24, top:30, bottom:40 },
+    xAxis:{ type:'category', data: labels, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub } },
+    yAxis:{ type:'value', axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub }, splitLine:{ lineStyle:{ color: tc.split } } },
+    series:[
+      { name:'分布', type:'boxplot', data: statsData, itemStyle:{ color:'#0ea5e9', borderColor:'#0369a1' } },
+      { name:'异常值', type:'scatter', data: outlierData, symbolSize:6, itemStyle:{ color:'#ef4444' } },
+    ],
+  };
+}
+function buildRadarOption(records, filters) {
+  const tc = themeColors();
+  const cr = records.filter(r => r.city === filters.focusCity);
+  if (!cr.length) return emptyOption('该城市在当前筛选范围内无数据');
+  const maxVals = { pm25:0, pm10:0, no2:0, so2:0, co:0, o3:0 };
+  for (const r of records) for (const m of POLLUTANT_METRICS) if (!isNaN(r[m]) && r[m] > maxVals[m]) maxVals[m] = r[m];
+  const indicators = POLLUTANT_METRICS.map(m => ({ name: METRIC_LABELS[m], max: maxVals[m] > 0 ? Math.ceil(maxVals[m]*1.1) : 100 }));
+  const avgVals = POLLUTANT_METRICS.map(m => Math.round(avgMetric(cr, m)*100)/100);
+  return {
+    backgroundColor:'transparent', tooltip:{},
+    radar:{
+      indicator: indicators, shape:'polygon', splitNumber:4,
+      axisName:{ color: tc.sub, fontSize:11 }, splitLine:{ lineStyle:{ color: tc.split } },
+      splitArea:{ areaStyle:{ color: state.dark ? ['rgba(14,165,233,.04)','rgba(14,165,233,.08)'] : ['rgba(14,165,233,.03)','rgba(14,165,233,.07)'] } },
+      axisLine:{ lineStyle:{ color: tc.axis } },
+    },
+    series:[{ type:'radar', data:[{ value: avgVals, name: filters.focusCity, areaStyle:{ color:'rgba(14,165,233,.25)' }, lineStyle:{ color:'#0ea5e9', width:2 }, itemStyle:{ color:'#0ea5e9' } }] }],
+  };
+}
+function buildBarOption(records, filters, barMode, barDate) {
+  const tc = themeColors();
+  const cities = filters.cities;
+  const labels = POLLUTANT_METRICS.map(m => METRIC_LABELS[m]);
+  let working;
+  if (barMode === 'specific' && barDate) {
+    const d = parseDate(barDate);
+    working = d ? records.filter(r => r.city && filters.cities.includes(r.city) && r.dateObj.getTime() === d.getTime()) : [];
+  } else {
+    working = records;
+  }
+  const series = cities.map((city, idx) => {
+    const cr = working.filter(r => r.city === city);
+    const data = POLLUTANT_METRICS.map(m => Math.round(avgMetric(cr, m)*100)/100);
+    return {
+      name: city, type:'bar', barMaxWidth:28,
+      itemStyle:{ color: CITY_PALETTE[idx % CITY_PALETTE.length], borderRadius:[4,4,0,0] }, data,
+    };
+  });
+  return {
+    backgroundColor:'transparent',
+    tooltip:{ trigger:'axis', axisPointer:{ type:'shadow' } },
+    legend:{ top:0, textStyle:{ color: tc.text, fontSize:12 } },
+    grid:{ left:60, right:24, top:40, bottom:40 },
+    xAxis:{ type:'category', data: labels, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub } },
+    yAxis:{ type:'value', axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub }, splitLine:{ lineStyle:{ color: tc.split } } },
+    series,
+  };
+}
+function buildScatterOption(records, filters) {
+  const tc = themeColors();
+  const xMetric = filters.metric, xLabel = METRIC_LABELS[xMetric];
+  const cities = filters.cities;
+  const series = cities.map((city, idx) => {
+    const data = [];
+    for (const r of records) {
+      if (r.city !== city) continue;
+      if (isNaN(r[xMetric]) || isNaN(r.aqi)) continue;
+      data.push([r[xMetric], r.aqi, isNaN(r.o3) ? 0 : r.o3, r.date]);
+    }
+    return {
+      name: city, type:'scatter', data,
+      symbolSize: v => Math.max(6, Math.min(40, (v[2] || 10)/6)),
+      itemStyle:{ color: CITY_PALETTE[idx % CITY_PALETTE.length], opacity:.7 },
+      emphasis:{ focus:'series' },
+    };
+  });
+  return {
+    backgroundColor:'transparent',
+    tooltip:{ formatter: p => `${p.seriesName}<br/>${p.value[3]}<br/>${xLabel}: ${p.value[0]}<br/>AQI: ${p.value[1]}<br/>O₃: ${p.value[2]}` },
+    legend:{ top:0, textStyle:{ color: tc.text, fontSize:12 } },
+    grid:{ left:60, right:24, top:40, bottom:50 },
+    xAxis:{ type:'value', name: xLabel, nameLocation:'middle', nameGap:28, nameTextStyle:{ color: tc.sub }, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub }, splitLine:{ lineStyle:{ color: tc.split } } },
+    yAxis:{ type:'value', name:'AQI', nameTextStyle:{ color: tc.sub }, axisLine:{ lineStyle:{ color: tc.axis } }, axisLabel:{ color: tc.sub }, splitLine:{ lineStyle:{ color: tc.split } } },
+    series,
+  };
+}
+function buildChartOption(chartId, records, filters, cardState) {
+  switch (chartId) {
+    case 'trend': return buildTrendOption(records, filters);
+    case 'calendar': return buildCalendarOption(records, filters);
+    case 'pie': return buildPieOption(records, filters);
+    case 'boxplot': return buildBoxplotOption(records, filters);
+    case 'radar': return buildRadarOption(records, filters);
+    case 'bar': return buildBarOption(records, filters, cardState?.barMode ?? 'range', cardState?.barDate ?? filters.endDate);
+    case 'scatter': return buildScatterOption(records, filters);
+    default: return emptyOption('未知图表');
+  }
+}
+
+/* ============================================================================
+ * CARD STATE HELPERS
+ * ========================================================================== */
+function ensureCardStates(cities, range) {
+  let changed = false;
+  for (const id of CARD_CHART_IDS) {
+    if (!state.cardStates[id]) {
+      state.cardStates[id] = {
+        cities: [...cities], focusCity: cities[0] ?? '',
+        startDate: range.start, endDate: range.end,
+        barMode: 'range', barDate: range.end, syncWithSidebar: false,
+      };
+      changed = true;
+    }
+  }
+  return changed;
+}
+function clearCardStates() { state.cardStates = {}; }
+function getEffectiveFilters(chartId) {
+  const cs = state.cardStates[chartId];
+  const allCities = uniqueCities(state.records);
+  const cities = (cs?.cities ?? []).filter(c => allCities.includes(c));
+  const focusCity = cs?.focusCity && allCities.includes(cs.focusCity) ? cs.focusCity : (allCities[0] ?? '');
+  const startDate = cs?.startDate || state.filters.startDate;
+  const endDate = cs?.endDate || state.filters.endDate;
+  const sync = cs?.syncWithSidebar ?? false;
+  let base;
+  if (SINGLE_CITY_CHARTS.includes(chartId)) {
+    base = { ...state.filters, focusCity };
+  } else if (sync) {
+    base = { ...state.filters };
+  } else {
+    base = { ...state.filters, cities: cities.length ? cities : allCities, startDate, endDate };
+  }
+  if (chartId === 'bar' && (cs?.barMode ?? 'range') === 'specific' && (cs?.barDate || state.filters.endDate)) {
+    base = { ...base, startDate: cs.barDate, endDate: cs.barDate };
+  }
+  if (chartId === 'pie') base = { ...base, levelFilter: null };
+  return base;
+}
+
+/* ============================================================================
+ * RENDERING
+ * ========================================================================== */
+function renderSidebar() {
+  const root = document.getElementById('sidebarScroll');
+  const f = state.filters;
+  const allCities = uniqueCities(state.records);
+  const allSel = f.cities.length === allCities.length && allCities.length > 0;
+
+  root.innerHTML = `
+    <div class="section">
+      <div class="section-label">数据上传</div>
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">${state._busy ? '<span class="spin">⟳</span>' : '⬆️'}</div>
+        <div class="main-text">点击或拖拽上传 CSV 文件</div>
+        <div class="sub-text">文件名格式：城市名_YYYYMM.csv</div>
+        <input type="file" id="fileInput" accept=".csv" multiple style="display:none" />
+      </div>
+      <button class="btn-sample" id="sampleBtn" ${state._busy?'disabled':''}><span>📂</span> 加载内置示例数据</button>
+      ${renderFileList()}
+    </div>
+    <div class="section">
+      <div class="section-label">统计摘要</div>
+      ${renderStats()}
+    </div>
+    <div class="section">
+      <div class="section-label">视图模式</div>
+      <div class="view-tabs">
+        <button class="view-tab ${state.view==='overview'?'active':''}" data-view="overview">概述</button>
+        <button class="view-tab ${state.view==='deep'?'active':''}" data-view="deep">深度分析</button>
+        <button class="view-tab ${state.view==='all'?'active':''}" data-view="all">全部</button>
+      </div>
+      <div class="view-desc">${PRESET_VIEWS[state.view].label}：${PRESET_VIEWS[state.view].charts.map(c=>CHART_TITLES[c]).join('、')}</div>
+    </div>
+    <div class="section">
+      <div class="section-label">时间范围</div>
+      <div class="field-label">起始日期</div>
+      <input type="date" id="startDate" value="${f.startDate}" max="${f.endDate||''}" />
+      <div class="field-label" style="margin-top:8px">结束日期</div>
+      <input type="date" id="endDate" value="${f.endDate}" min="${f.startDate||''}" />
+    </div>
+    <div class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="section-label" style="margin:0">城市选择</div>
+        <button class="city-select-all" id="selectAllCities" ${allCities.length===0?'disabled':''}>${allSel?'☐ 取消全选':'☑ 全选'}</button>
+      </div>
+      ${allCities.length === 0
+        ? '<div style="border:1px dashed var(--border);border-radius:8px;padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">请先上传数据</div>'
+        : `<div class="city-list">${allCities.map(c => `<label class="checkbox-row"><input type="checkbox" data-city="${c}" ${f.cities.includes(c)?'checked':''}/> <span>${c}</span></label>`).join('')}</div>`}
+    </div>
+    <div class="section">
+      <div class="section-label">分析指标</div>
+      <select class="compact" id="metricSelect">
+        ${ALL_METRICS.map(m => `<option value="${m}" ${f.metric===m?'selected':''}>${METRIC_LABELS[m]}</option>`).join('')}
+      </select>
+      <div class="view-desc">用于散点图 X 轴</div>
+    </div>
+    ${f.levelFilter ? `<div class="level-badge"><div style="font-weight:600">已启用等级过滤</div><div style="margin-top:2px">仅显示「${f.levelFilter}」的数据</div><span class="clear-link" id="clearLevel">清除过滤</span></div>` : ''}
+  `;
+  attachSidebarEvents();
+}
+function renderFileList() {
+  if (!state.files.length) return '';
+  return `<div style="margin-top:8px"><div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">已上传文件 (${state.files.length})</div>
+    <div class="file-list">${state.files.map(f => `<div class="file-item"><span>📄</span><div style="flex:1;min-width:0"><div class="fname">${f.name}</div><div class="fmeta">${f.city} · ${f.recordCount} 条</div></div><button class="remove-btn" data-file="${f.name}" title="移除">✕</button></div>`).join('')}</div></div>`;
+}
+function renderStats() {
+  if (!state.records.length) return '<div style="border:1px dashed var(--border);border-radius:8px;padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">上传数据后显示统计摘要</div>';
+  const s = computeStats(applyFilters(state.records, state.filters));
+  const items = [
+    { label:'总记录数', value: s.totalRecords.toLocaleString(), icon:'🗄️', tint:'color:#0ea5e9;background:rgba(14,165,233,.1)' },
+    { label:'城市数', value: String(s.cityCount), icon:'📍', tint:'color:#14b8a6;background:rgba(20,184,166,.1)' },
+    { label:'平均 AQI', value: s.avgAqi.toFixed(1), icon:'📊', tint:'color:#8b5cf6;background:rgba(139,92,246,.1)' },
+    { label:'最大 AQI', value: String(s.maxAqi), icon:'⬆️', tint:'color:#ef4444;background:rgba(239,68,68,.1)' },
+    { label:'最小 AQI', value: String(s.minAqi), icon:'⬇️', tint:'color:#22c55e;background:rgba(34,197,94,.1)' },
+    { label:'优良比例', value: s.goodRate+'%', icon:'😊', tint:'color:#10b981;background:rgba(16,185,129,.1)' },
+  ];
+  return `<div class="stats-grid">${items.map(it => `<div class="stat-card"><div class="stat-icon" style="${it.tint}">${it.icon}</div><div class="stat-value">${it.value}</div><div class="stat-label">${it.label}</div></div>`).join('')}</div>`;
+}
+function renderMain() {
+  const body = document.getElementById('mainBody');
+  // Dispose all existing ECharts instances before re-rendering (their canvas
+  // elements are about to be replaced by new innerHTML).
+  for (const id in state.echartsInstances) {
+    try { state.echartsInstances[id].dispose(); } catch (e) {}
+    delete state.echartsInstances[id];
+  }
+  if (!state.records.length) {
+    body.innerHTML = `<div class="empty-state"><div class="emoji">🌬️</div><h3>欢迎使用空气质量仪表板</h3><p>请在左侧上传城市 CSV 文件，或点击「加载内置示例数据」快速体验全部图表功能。</p><div class="hint">CSV 列：日期, AQI指数, 质量等级, 当天AQI排名, PM2.5, PM10, NO2, SO2, CO, O3</div></div>`;
+    document.getElementById('pdfBtn').disabled = true;
+    return;
+  }
+  document.getElementById('pdfBtn').disabled = false;
+  const preset = PRESET_VIEWS[state.view].charts;
+  const visible = state.chartOrder.filter(id => preset.includes(id));
+  body.innerHTML = `<div class="grid" id="chartGridBody">${visible.map(id => renderCard(id)).join('')}</div>`;
+  attachCardEvents();
+  // Render charts after DOM is ready
+  requestAnimationFrame(() => {
+    for (const id of visible) renderChart(id);
+  });
+}
+function renderCard(chartId) {
+  const title = CHART_TITLES[chartId];
+  const isTable = chartId === 'table';
+  const isSingle = SINGLE_CITY_CHARTS.includes(chartId);
+  const isMulti = MULTI_CITY_CHARTS.includes(chartId);
+  const isBar = chartId === 'bar';
+  const cs = state.cardStates[chartId] || {};
+  const allCities = uniqueCities(state.records);
+
+  let filterBar = '';
+  if (isSingle) {
+    const fc = (cs.focusCity && allCities.includes(cs.focusCity)) ? cs.focusCity : (allCities[0] ?? '');
+    filterBar = `<div class="card-filter-bar">
+      <span class="lbl">城市</span>
+      <select data-card="${chartId}" data-field="focusCity">
+        ${allCities.map(c => `<option value="${c}" ${fc===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <span class="lbl">📅 ${state.filters.startDate || '—'} ~ ${state.filters.endDate || '—'}</span>
+    </div>`;
+  } else if (isMulti) {
+    const sync = cs.syncWithSidebar ?? false;
+    const dispCities = sync ? state.filters.cities : (cs.cities ?? allCities);
+    const dispStart = sync ? state.filters.startDate : (cs.startDate || state.filters.startDate);
+    const dispEnd = sync ? state.filters.endDate : (cs.endDate || state.filters.endDate);
+    const barMode = cs.barMode ?? 'range';
+    const cityLabel = !dispCities.length ? '无城市'
+      : dispCities.length === allCities.length ? `全部城市 (${dispCities.length})`
+      : dispCities.length <= 2 ? dispCities.join('、')
+      : `${dispCities[0]} 等 ${dispCities.length} 个`;
+    filterBar = `<div class="card-filter-bar">
+      <button class="city-multi" data-card="${chartId}" id="cityMulti-${chartId}" ${sync?'disabled':''}>
+        <span>📍</span><span class="city-label">${cityLabel}</span><span>▾</span>
+      </button>
+      ${isBar ? `<div class="mode-toggle">
+        <button data-card="${chartId}" data-mode="range" class="${barMode==='range'?'active':''}">区间平均</button>
+        <button data-card="${chartId}" data-mode="specific" class="${barMode==='specific'?'active':''}">指定日期</button>
+      </div>` : ''}
+      ${isBar && barMode === 'specific'
+        ? `<span class="lbl">日期</span><input type="date" data-card="${chartId}" data-field="barDate" value="${cs.barDate || state.filters.endDate}" />`
+        : `<input type="date" data-card="${chartId}" data-field="startDate" value="${dispStart}" ${sync?'disabled':''} />
+           <span class="lbl">~</span>
+           <input type="date" data-card="${chartId}" data-field="endDate" value="${dispEnd}" ${sync?'disabled':''} />`}
+      <label class="sync-toggle ${sync?'active':''}" data-card="${chartId}">
+        <input type="checkbox" data-card="${chartId}" data-field="sync" ${sync?'checked':''} />
+        ${sync?'🔗':'🔓'} 同步筛选栏
+      </label>
+    </div>`;
+  }
+
+  const levelChip = (chartId === 'pie' && state.filters.levelFilter)
+    ? `<span class="level-chip" data-clear-level>✕ ${state.filters.levelFilter}</span>` : '';
+
+  return `<div class="chart-card" draggable="true" data-chart="${chartId}">
+    <div class="card-header">
+      <span class="grip">⠿</span>
+      <span class="card-title">${title}</span>
+      ${levelChip}
+      <button class="export-btn" data-export="${chartId}" ${isTable?'disabled':''} title="导出图片">💾</button>
+    </div>
+    ${filterBar}
+    <div class="card-body" id="body-${chartId}">
+      <div class="no-data" id="nodata-${chartId}" style="display:none">当前筛选范围内无数据</div>
+      ${isTable ? '<div class="table-wrap" id="table-' + chartId + '"></div>' : '<div class="chart-canvas" id="canvas-' + chartId + '"></div>'}
+    </div>
+  </div>`;
+}
+function renderChart(chartId) {
+  const isTable = chartId === 'table';
+  if (isTable) { renderTable(chartId); return; }
+  const effFilters = getEffectiveFilters(chartId);
+  const filtered = applyFilters(state.records, effFilters);
+  const cs = state.cardStates[chartId];
+  const canvas = document.getElementById('canvas-' + chartId);
+  const nodata = document.getElementById('nodata-' + chartId);
+  if (!canvas) return;
+  if (!filtered.length) {
+    if (nodata) nodata.style.display = 'flex';
+    canvas.style.display = 'none';
+    if (state.echartsInstances[chartId]) { state.echartsInstances[chartId].dispose(); delete state.echartsInstances[chartId]; }
+    return;
+  }
+  if (nodata) nodata.style.display = 'none';
+  canvas.style.display = 'block';
+  const option = buildChartOption(chartId, filtered, effFilters, cs);
+  if (state.echartsInstances[chartId]) {
+    state.echartsInstances[chartId].setOption(option, true);
+  } else {
+    const inst = echarts.init(canvas, undefined, { renderer:'canvas' });
+    inst.setOption(option, true);
+    if (chartId === 'pie') {
+      inst.on('click', (params) => {
+        if (params.componentType !== 'series') return;
+        const level = params.name;
+        if (!level) return;
+        if (state.filters.levelFilter === level) {
+          state.filters.levelFilter = null;
+          toast('已清除等级过滤', 'info');
+        } else {
+          state.filters.levelFilter = level;
+          toast(`已过滤：仅显示「${level}」`, 'success');
+        }
+        renderAll();
+      });
+    }
+    state.echartsInstances[chartId] = inst;
+  }
+}
+function renderTable(chartId) {
+  const effFilters = getEffectiveFilters(chartId);
+  const filtered = applyFilters(state.records, effFilters);
+  const wrap = document.getElementById('table-' + chartId);
+  if (!wrap) return;
+  if (!filtered.length) {
+    wrap.innerHTML = '<div class="no-data">当前筛选范围内无数据</div>';
+    return;
+  }
+  const cols = [
+    { key:'date', label:'日期' }, { key:'city', label:'城市' }, { key:'aqi', label:'AQI' },
+    { key:'level', label:'等级' }, { key:'pm25', label:'PM2.5' }, { key:'pm10', label:'PM10' },
+    { key:'no2', label:'NO₂' }, { key:'so2', label:'SO₂' }, { key:'co', label:'CO' }, { key:'o3', label:'O₃' },
+  ];
+  const display = filtered.slice(0, 200);
+  const sortKey = state._tableSort?.key || 'date';
+  const sortDir = state._tableSort?.dir || 'asc';
+  const sorted = [...filtered].sort((a,b) => {
+    let c = 0;
+    if (sortKey === 'date') c = a.dateObj - b.dateObj;
+    else if (sortKey === 'city' || sortKey === 'level') c = a[sortKey].localeCompare(b[sortKey],'zh');
+    else c = (a[sortKey]||0) - (b[sortKey]||0);
+    return sortDir === 'asc' ? c : -c;
+  }).slice(0, 200);
+  wrap.innerHTML = `<div class="table-meta"><span>共 ${filtered.length.toLocaleString()} 条记录</span><span>显示前 ${sorted.length} 条</span></div>
+    <div class="table-scroll"><table class="data-table"><thead><tr>${cols.map(col => `<th data-sort="${col.key}">${col.label} ${sortKey===col.key?(sortDir==='asc'?'▲':'▼'):''}</th>`).join('')}</tr></thead>
+    <tbody>${sorted.map(r => `<tr><td>${r.date}</td><td>${r.city}</td><td style="font-weight:600">${isNaN(r.aqi)?'-':r.aqi}</td><td><span class="lvl-badge" style="background:${(LEVEL_COLORS[r.level]||'#94a3b8')+'22'};color:${LEVEL_COLORS[r.level]||'#94a3b8'}">${r.level}</span></td>${['pm25','pm10','no2','so2','co','o3'].map(m=>`<td>${isNaN(r[m])?'-':r[m]}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('th[data-sort]').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.sort;
+      if (state._tableSort?.key === k) state._tableSort.dir = state._tableSort.dir === 'asc' ? 'desc' : 'asc';
+      else state._tableSort = { key: k, dir: 'asc' };
+      renderTable(chartId);
+    };
+  });
+}
+function renderAll() {
+  renderSidebar();
+  renderMain();
+}
+
+/* ============================================================================
+ * EVENT HANDLERS
+ * ========================================================================== */
+function attachSidebarEvents() {
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
+  uploadZone.onclick = () => fileInput.click();
+  uploadZone.ondragover = (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); };
+  uploadZone.ondragleave = () => uploadZone.classList.remove('drag-over');
+  uploadZone.ondrop = (e) => { e.preventDefault(); uploadZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); };
+  fileInput.onchange = (e) => { if (e.target.files.length) handleFiles(e.target.files); fileInput.value = ''; };
+  document.getElementById('sampleBtn').onclick = loadSample;
+
+  document.querySelectorAll('.view-tab').forEach(b => b.onclick = () => { state.view = b.dataset.view; renderAll(); });
+  const sd = document.getElementById('startDate'), ed = document.getElementById('endDate');
+  if (sd) sd.onchange = () => { state.filters.startDate = sd.value; state.filters.levelFilter = null; renderAll(); };
+  if (ed) ed.onchange = () => { state.filters.endDate = ed.value; state.filters.levelFilter = null; renderAll(); };
+
+  document.querySelectorAll('.city-list input[type=checkbox]').forEach(cb => {
+    cb.onchange = () => {
+      const c = cb.dataset.city;
+      if (cb.checked) { if (!state.filters.cities.includes(c)) state.filters.cities.push(c); }
+      else state.filters.cities = state.filters.cities.filter(x => x !== c);
+      renderAll();
+    };
+  });
+  const selAll = document.getElementById('selectAllCities');
+  if (selAll) selAll.onclick = () => {
+    const all = uniqueCities(state.records);
+    state.filters.cities = state.filters.cities.length === all.length ? [] : [...all];
+    renderAll();
+  };
+  const ms = document.getElementById('metricSelect');
+  if (ms) ms.onchange = () => { state.filters.metric = ms.value; renderAll(); };
+  const cl = document.getElementById('clearLevel');
+  if (cl) cl.onclick = () => { state.filters.levelFilter = null; renderAll(); };
+
+  document.querySelectorAll('.file-item .remove-btn').forEach(b => b.onclick = () => removeFile(b.dataset.file));
+}
+function attachCardEvents() {
+  // Drag reorder
+  document.querySelectorAll('.chart-card').forEach(card => {
+    card.ondragstart = (e) => { state.draggedChart = card.dataset.chart; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+    card.ondragend = () => card.classList.remove('dragging');
+    card.ondragover = (e) => { e.preventDefault(); card.classList.add('drag-over'); };
+    card.ondragleave = () => card.classList.remove('drag-over');
+    card.ondrop = (e) => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const dragged = state.draggedChart;
+      const target = card.dataset.chart;
+      if (!dragged || dragged === target) return;
+      const from = state.chartOrder.indexOf(dragged);
+      const to = state.chartOrder.indexOf(target);
+      state.chartOrder.splice(from, 1);
+      state.chartOrder.splice(to, 0, dragged);
+      state.draggedChart = null;
+      renderMain();
+    };
+  });
+  // Export buttons
+  document.querySelectorAll('.export-btn').forEach(b => {
+    b.onclick = () => exportChartPng(b.dataset.export);
+  });
+  // Clear level chip
+  document.querySelectorAll('[data-clear-level]').forEach(el => {
+    el.onclick = () => { state.filters.levelFilter = null; renderAll(); };
+  });
+  // Single-city focus selects
+  document.querySelectorAll('select[data-field="focusCity"]').forEach(sel => {
+    sel.onchange = () => {
+      const id = sel.dataset.card;
+      state.cardStates[id].focusCity = sel.value;
+      renderChart(id);
+    };
+  });
+  // City multi-select popovers
+  document.querySelectorAll('.city-multi').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.card;
+      toggleCityPopover(id, btn);
+    };
+  });
+  // Date inputs
+  document.querySelectorAll('input[data-field="startDate"], input[data-field="endDate"]').forEach(inp => {
+    inp.onchange = () => {
+      const id = inp.dataset.card;
+      state.cardStates[id][inp.dataset.field] = inp.value;
+      state.cardStates[id].syncWithSidebar = false;
+      renderChart(id);
+    };
+  });
+  document.querySelectorAll('input[data-field="barDate"]').forEach(inp => {
+    inp.onchange = () => { const id = inp.dataset.card; state.cardStates[id].barDate = inp.value; renderChart(id); };
+  });
+  // Bar mode toggle
+  document.querySelectorAll('.mode-toggle button').forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.card;
+      state.cardStates[id].barMode = b.dataset.mode;
+      renderMain();
+    };
+  });
+  // Sync toggles
+  document.querySelectorAll('.sync-toggle input').forEach(cb => {
+    cb.onchange = () => {
+      const id = cb.dataset.card;
+      const v = cb.checked;
+      if (v) {
+        state.cardStates[id].syncWithSidebar = true;
+      } else {
+        state.cardStates[id].syncWithSidebar = false;
+        state.cardStates[id].cities = [...state.filters.cities];
+        state.cardStates[id].startDate = state.filters.startDate;
+        state.cardStates[id].endDate = state.filters.endDate;
+      }
+      renderMain();
+    };
+  });
+}
+function toggleCityPopover(chartId, anchor) {
+  // Close any existing popover
+  const existing = document.querySelector('.city-popover');
+  if (existing) existing.remove();
+  if (state.openPopover === chartId) { state.openPopover = null; return; }
+  state.openPopover = chartId;
+  const cs = state.cardStates[chartId];
+  const allCities = uniqueCities(state.records);
+  const selected = cs.cities ?? [];
+  const allSel = selected.length === allCities.length && allCities.length > 0;
+  const pop = document.createElement('div');
+  pop.className = 'city-popover';
+  pop.innerHTML = `<label class="pop-row"><input type="checkbox" id="popAll" ${allSel?'checked':''}/> <b>${allSel?'取消全选':'全选'}</b></label>` +
+    allCities.map(c => `<label class="pop-row"><input type="checkbox" data-city="${c}" ${selected.includes(c)?'checked':''}/> ${c}</label>`).join('');
+  anchor.parentElement.appendChild(pop);
+  pop.querySelector('#popAll').onchange = (e) => {
+    state.cardStates[chartId].cities = e.target.checked ? [...allCities] : [];
+    state.cardStates[chartId].syncWithSidebar = false;
+    pop.remove(); state.openPopover = null; renderMain();
+  };
+  pop.querySelectorAll('input[data-city]').forEach(cb => {
+    cb.onchange = () => {
+      const c = cb.dataset.city;
+      const s = state.cardStates[chartId].cities;
+      if (cb.checked) { if (!s.includes(c)) s.push(c); } else { state.cardStates[chartId].cities = s.filter(x => x !== c); }
+      state.cardStates[chartId].syncWithSidebar = false;
+      pop.remove(); state.openPopover = null; renderMain();
+    };
+  });
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function close(ev) {
+      if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); state.openPopover = null; document.removeEventListener('click', close); }
+    });
+  }, 0);
+}
+function handleFiles(fileList) {
+  const arr = Array.from(fileList).filter(f => /\.csv$/i.test(f.name));
+  if (!arr.length) { toast('请选择 CSV 文件', 'error'); return; }
+  state._busy = true; renderSidebar();
+  let processed = 0;
+  const newRecords = [];
+  const newFiles = [];
+  arr.forEach(async (file) => {
+    try {
+      const text = await file.text();
+      const city = cityFromFilename(file.name);
+      const recs = parseCsv(text, city);
+      newRecords.push(...recs);
+      newFiles.push({ name: file.name, city, recordCount: recs.length });
+    } catch (e) {
+      toast(`${file.name}: ${e.message}`, 'error');
+    }
+    processed++;
+    if (processed === arr.length) {
+      // Merge with existing (dedupe by city|date)
+      const seen = new Set(state.records.map(r => `${r.city}|${r.date}`));
+      const merged = [...state.records];
+      for (const r of newRecords) { const k = `${r.city}|${r.date}`; if (!seen.has(k)) { seen.add(k); merged.push(r); } }
+      merged.sort((a,b) => a.dateObj - b.dateObj);
+      const mergedFiles = [...state.files];
+      const nameSet = new Set(mergedFiles.map(f => f.name));
+      for (const f of newFiles) if (!nameSet.has(f.name)) mergedFiles.push(f);
+      applyNewRecords(merged, mergedFiles);
+      toast(`已加载 ${arr.length} 个文件，共 ${merged.length} 条记录`, 'success');
+    }
+  });
+}
+function removeFile(name) {
+  const entry = state.files.find(f => f.name === name);
+  if (!entry) return;
+  const nextRecs = state.records.filter(r => r.city !== entry.city);
+  const nextFiles = state.files.filter(f => f.name !== name);
+  applyNewRecords(nextRecs, nextFiles);
+  toast(`已移除 ${name}`, 'info');
+}
+function applyNewRecords(records, files) {
+  state.records = records;
+  state.files = files;
+  state._busy = false;
+  if (!records.length) {
+    clearCardStates();
+    state.filters = { startDate:'', endDate:'', cities:[], metric: state.filters.metric, levelFilter: null };
+  } else {
+    const cities = uniqueCities(records);
+    const range = dateRange(records);
+    state.filters.cities = cities;
+    state.filters.startDate = range.start;
+    state.filters.endDate = range.end;
+    state.filters.levelFilter = null;
+    ensureCardStates(cities, range);
+  }
+  renderAll();
+}
+function loadSample() {
+  state._busy = true; renderSidebar();
+  setTimeout(() => {
+    const sample = generateSampleData();
+    const sampleFiles = [
+      { name:'北京_202501.csv', city:'北京', recordCount:365 },
+      { name:'上海_202501.csv', city:'上海', recordCount:365 },
+      { name:'广州_202501.csv', city:'广州', recordCount:365 },
+    ];
+    const seen = new Set(state.records.map(r => `${r.city}|${r.date}`));
+    const merged = [...state.records];
+    for (const r of sample) { const k = `${r.city}|${r.date}`; if (!seen.has(k)) { seen.add(k); merged.push(r); } }
+    merged.sort((a,b) => a.dateObj - b.dateObj);
+    const mergedFiles = [...state.files];
+    const nameSet = new Set(mergedFiles.map(f => f.name));
+    for (const f of sampleFiles) if (!nameSet.has(f.name)) mergedFiles.push(f);
+    applyNewRecords(merged, mergedFiles);
+    toast('已加载示例数据（北京 / 上海 / 广州 全年）', 'success');
+  }, 300);
+}
+function exportChartPng(chartId) {
+  if (chartId === 'table') { toast('数据表格暂不支持导出图片', 'info'); return; }
+  const inst = state.echartsInstances[chartId];
+  if (!inst) return;
+  const url = inst.getDataURL({ type:'png', pixelRatio:2, backgroundColor: state.dark ? '#0f172a' : '#ffffff' });
+  const a = document.createElement('a');
+  a.href = url; a.download = `${chartId}-${Date.now()}.png`; a.click();
+  toast('图片已导出', 'success');
+}
+async function exportPdf() {
+  if (!state.records.length) return;
+  toast('正在生成 PDF…', 'info');
+  try {
+    const target = document.getElementById('chartGridBody');
+    const canvas = await html2canvas(target, { backgroundColor: state.dark ? '#0f172a' : '#ffffff', scale: 1.5, useCORS: true, logging: false });
+    const imgData = canvas.toDataURL('image/png');
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation:'landscape', unit:'px', format:[canvas.width, canvas.height] });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.save(`air-quality-dashboard-${Date.now()}.pdf`);
+    toast('PDF 已导出', 'success');
+  } catch (e) {
+    toast('PDF 导出失败: ' + e.message, 'error');
+  }
+}
+function toast(msg, type) {
+  const wrap = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(100%)'; el.style.transition = 'all .25s'; setTimeout(() => el.remove(), 250); }, 2800);
+}
+
+/* ============================================================================
+ * GLOBAL EVENTS
+ * ========================================================================== */
+document.getElementById('themeBtn').onclick = () => {
+  state.dark = !state.dark;
+  document.documentElement.classList.toggle('dark', state.dark);
+  document.getElementById('themeIcon').textContent = state.dark ? '☀️' : '🌙';
+  // Re-render charts (theme colors)
+  for (const id of Object.keys(state.echartsInstances)) renderChart(id);
+  if (state.view === 'all' || PRESET_VIEWS[state.view].charts.includes('table')) {
+    const tableCard = document.querySelector('[data-chart="table"]');
+    if (tableCard) renderTable('table');
+  }
+};
+document.getElementById('pdfBtn').onclick = exportPdf;
+document.querySelectorAll('.preset-pill').forEach(p => p.onclick = () => { state.view = p.dataset.view; renderAll(); });
+document.getElementById('mobileFilterBtn').onclick = () => {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('drawerOverlay').classList.add('show');
+};
+document.getElementById('drawerOverlay').onclick = () => {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('drawerOverlay').classList.remove('show');
+};
+window.addEventListener('resize', () => {
+  for (const id in state.echartsInstances) state.echartsInstances[id].resize();
+});
+
+/* ============================================================================
+ * INIT
+ * ========================================================================== */
+renderAll();
+toast('空气质量仪表板已就绪', 'success');
+</script>
+</body>
+</html>
